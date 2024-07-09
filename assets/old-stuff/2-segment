@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+
+import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
+import cv2
+
+from ultralytics import FastSAM, SAM
+from ultralytics.models.fastsam import FastSAMPrompt
+
+import os
+import json
+import math
+import tempfile
+import subprocess
+
+from src.data import list_inputs
+
+sam_model = FastSAM('FastSAM-s.pt')
+sam_model = SAM('sam_b.pt')
+
+# import numpy as np
+# from segment_anything import sam_model_registry, SamPredictor
+# sam_checkpoint = "sam_vit_b_01ec64.pth"
+# model_type = "vit_b"
+# device = "cuda"
+# sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
+# sam.to(device=device)
+# predictor = SamPredictor(sam)
+
+TARGET_HEIGHT = 1024
+IMAGE_DIR = "data/image-seq"
+OUTPUT_DIR = "data/masks"
+TEMPFILE = os.path.join(tempfile.mkdtemp(), 'tmp.png')
+GRID_PREVIEW = True
+
+for id, cls, description in list_inputs():
+    # find the image sequence directory
+    image_subdir = os.path.join(IMAGE_DIR, id)
+
+    if not os.path.exists(image_subdir):
+        print(name, 'has not been generated yet or is missing frames!')
+        continue
+
+    print('Processing [' + id + ']', '"' + description + '"', '(' + cls + ')')
+
+    files = sorted(os.listdir(image_subdir))
+
+    # grid preview
+    if GRID_PREVIEW:
+        size = math.ceil(math.sqrt(len(files)))
+        fig, axs = plt.subplots(size, size, figsize=(10, 10))
+
+        for i, ax in enumerate(axs.flat):
+            ax.axis('off')
+
+    # read all images
+    for i in range(0, len(files)):
+        image = files[i]
+        
+        # load image metadata
+        filename = os.path.join(image_subdir, image)
+        image = cv2.imread(filename)
+
+        height, width, _ = image.shape
+        scale_factor = TARGET_HEIGHT / max(height, width)
+        dim = (round(width * scale_factor), round(height * scale_factor))
+
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image = cv2.resize(image, dim)
+
+        ## ULTRALYTICS
+        # segment using given prompt
+        everything_results = sam_model(filename, device='cuda', imgsz=TARGET_HEIGHT, conf=0.4, iou=0.9)
+        prompt_process = FastSAMPrompt(filename, everything_results, device='cuda')
+
+        ann = prompt_process.text_prompt(text="the object on the table")
+        # ann = prompt_process.point_prompt(points=[[dim[0] / 2, dim[1] / 2]], pointlabel=[1])
+
+        # ann = sam_model(filename, imgsz=TARGET_HEIGHT, points=[[dim[0] / 2, dim[1] / 2]], labels=[1])
+        # print(ann[0].masks)
+
+        ## SAM ONLY
+
+        # predictor.set_image(image)
+        # masks, _, _ = predictor.predict(
+        #     point_coords=np.array([[dim[0] / 2, dim[1] / 2]]),
+        #     point_labels=np.array([1]),
+        #     multimask_output=False,
+        # )
+
+        # add to grid
+        if GRID_PREVIEW:
+            for j, axi in enumerate(axs.flat):
+                if i == j:
+                    ax = axi
+                    break
+            
+            ax.imshow(image)
+
+            # color = np.array([30/255, 144/255, 255/255, 0.6])
+            # h, w = masks[0].shape[-2:]
+            # mask_image = masks[0].reshape(h, w, 1) * color.reshape(1, 1, -1)
+            # ax.imshow(mask_image)
+
+            ax.plot(dim[0] / 2, dim[1] / 2, 'ro')
+
+            prompt_process.fast_show_mask(annotation=ann, ax=ax)
+
+    if GRID_PREVIEW:
+        plt.show()
+        plt.close()

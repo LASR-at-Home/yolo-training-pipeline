@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+
+import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
+import cv2
+
+from ultralytics import FastSAM
+from ultralytics.models.fastsam import FastSAMPrompt
+
+import os
+import json
+import subprocess
+
+from src.getch import getch
+
+sam_model = FastSAM('FastSAM-s.pt')
+
+input_dir = "data/input"
+image_dir = "data/image-seq"
+output_dir = "data/sam-mask-input"
+
+class Annotate(object):
+    def __init__(self):
+        self.ax = plt.gca()
+        self.rect = Rectangle((0,0), 1, 1, facecolor='red', alpha=0.5)
+        self.x0 = None
+        self.y0 = None
+        self.x1 = None
+        self.y1 = None
+        self.ax.add_patch(self.rect)
+        self.ax.figure.canvas.mpl_connect('button_press_event', self.on_press)
+        self.ax.figure.canvas.mpl_connect('button_release_event', self.on_release)
+
+    def on_press(self, event):
+        self.x0 = event.xdata
+        self.y0 = event.ydata
+
+    def on_release(self, event):
+        self.x1 = event.xdata
+        self.y1 = event.ydata
+        self.rect.set_width(self.x1 - self.x0)
+        self.rect.set_height(self.y1 - self.y0)
+        self.rect.set_xy((self.x0, self.y0))
+        self.ax.figure.canvas.draw()
+
+for filename in os.listdir(input_dir):
+    if filename.endswith(".mp4"):
+        name = os.path.splitext(filename)[0]
+        image_subdir = os.path.join(image_dir, name)
+
+        if not os.path.exists(image_subdir):
+            print(name, 'has not been generated yet or is missing frames!')
+            continue
+
+        output = os.path.join(output_dir, f'{name}.json')
+
+        if os.path.exists(output):
+            print(name, 'skipped as bounding box input already exists!')
+            continue
+
+        sample_source = os.path.join(image_subdir, os.listdir(image_subdir)[0])
+        image = cv2.imread(sample_source)
+        height, width, _ = image.shape
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        annotating = True
+        while annotating:
+            plt.axis('off')
+            plt.imshow(image)
+            a = Annotate()
+            plt.show()
+
+            # try it out
+            # retina_masks=True,
+            everything_results = sam_model(sample_source, device='cuda', imgsz=max(width, height), conf=0.4, iou=0.9)
+            prompt_process = FastSAMPrompt(sample_source, everything_results, device='cuda')
+            # ann = prompt_process.box_prompt(bbox=[a.x0, a.x1, a.y0, a.y1])
+            ann = prompt_process.text_prompt(text=name)
+
+            print('Save result [y/N]?')
+
+            plt.axis('off')
+            plt.imshow(image)
+            prompt_process.fast_show_mask(annotation=ann, ax=plt.gca())
+            plt.show()
+
+            if getch() == 'y':
+                break
+
+        if a.x0 is not None:
+            with open(output, 'w') as f:
+                f.write(json.dumps({
+                    "x0": a.x0,
+                    "x1": a.x1,
+                    "y0": a.y0,
+                    "y1": a.y1
+                }))

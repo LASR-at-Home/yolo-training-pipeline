@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+
+import os
+import cv2
+import json
+import math
+import tempfile
+import subprocess
+import numpy as np
+import matplotlib.pyplot as plt
+
+from matplotlib.patches import Rectangle
+
+from src.data import list_inputs
+
+# from segment_anything import sam_model_registry, SamPredictor
+# # SAM_CHECKPOINT = "sam_vit_b_01ec64.pth"
+# SAM_CHECKPOINT = "sam_vit_h_4b8939.pth"
+# MODEL_TYPE = "vit_h"
+# DEVICE = "cuda"
+# sam = sam_model_registry[MODEL_TYPE](checkpoint=SAM_CHECKPOINT)
+# sam.to(device=DEVICE)
+# predictor = SamPredictor(sam)
+
+# from mobile_sam import sam_model_registry, SamAutomaticMaskGenerator, SamPredictor
+# model_type = "vit_t"
+# sam_checkpoint = "mobile_sam.pt"
+# device = "cuda"
+# mobile_sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
+# mobile_sam.to(device=device)
+# mobile_sam.eval()
+# predictor = SamPredictor(mobile_sam)
+
+from ultralytics import SAM
+model = SAM('mobile_sam.pt')
+
+TARGET_HEIGHT = 1024
+IMAGE_DIR = "data/image-seq"
+OUTPUT_DIR = "data/masks"
+TEMPFILE = os.path.join(tempfile.mkdtemp(), 'tmp.png')
+GRID_PREVIEW = True
+
+class Annotate:
+    def __init__(self, initial_image):
+        self.ax = plt.gca()
+        self.image = initial_image
+        self.mask_image = None
+
+        # predictor.set_image(self.image)
+
+        self.rect = Rectangle((0,0), 1, 1, facecolor='none', alpha=0.5, edgecolor='red', linewidth=1)
+        self.x0 = None
+        self.y0 = None
+        self.x1 = None
+        self.y1 = None
+    
+        self.ax.figure.canvas.mpl_connect('button_press_event', self.on_press)
+        self.ax.figure.canvas.mpl_connect('button_release_event', self.on_release)
+
+        self.draw()
+    
+    def on_press(self, event):
+        self.x0 = event.xdata
+        self.y0 = event.ydata
+    
+    def on_release(self, event):
+        self.x1 = event.xdata
+        self.y1 = event.ydata
+
+        if self.x0 > self.x1:
+            tmp = self.x0
+            self.x0 = self.x1
+            self.x1 = tmp
+
+        if self.y0 > self.y1:
+            tmp = self.y0
+            self.y0 = self.y1
+            self.y1 = tmp
+
+        self.rect.set_width(self.x1 - self.x0)
+        self.rect.set_height(self.y1 - self.y0)
+        self.rect.set_xy((self.x0, self.y0))
+
+        self.inference()
+        self.draw()
+
+    def draw(self):
+        self.ax.cla()
+        self.ax.imshow(self.image)
+
+        if self.mask_image is not None:
+            self.ax.imshow(self.mask_image)
+
+        self.ax.add_patch(self.rect)
+        self.ax.figure.canvas.draw()
+    
+    def inference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'tmp.png')
+            cv2.imwrite(path, self.image)
+
+            result = model.predict(path, bboxes=[self.x0, self.y0, self.x1, self.y1])
+            self.mask_image = result[0].plot()
+
+        # masks, _, _ = predictor.predict(
+        #     point_coords=None,
+        #     point_labels=None,
+        #     box=np.array([self.x0, self.y0, self.x1, self.y1]),
+        #     multimask_output=False,
+        # )
+
+        # color = np.array([30/255, 144/255, 255/255, 0.6])
+        # h, w = masks[0].shape[-2:]
+        # self.mask_image = masks[0].reshape(h, w, 1) * color.reshape(1, 1, -1)
+
+
+
+for id, cls, description in list_inputs():
+    # find the image sequence directory
+    image_subdir = os.path.join(IMAGE_DIR, id)
+
+    if not os.path.exists(image_subdir):
+        print(name, 'has not been generated yet or is missing frames!')
+        continue
+
+    print('Processing [' + id + ']', '"' + description + '"', '(' + cls + ')')
+    files = sorted(os.listdir(image_subdir))
+
+    # read all images
+    for image in files:        
+        # load image metadata
+        filename = os.path.join(image_subdir, image)
+        image = cv2.imread(filename)
+
+        height, width, _ = image.shape
+        scale_factor = TARGET_HEIGHT / max(height, width)
+        dim = (round(width * scale_factor), round(height * scale_factor))
+
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image = cv2.resize(image, dim)
+
+        a = Annotate(initial_image=image)
+        plt.show()
+
+        print(a.x0)

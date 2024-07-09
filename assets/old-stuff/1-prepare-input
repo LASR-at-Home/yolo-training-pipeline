@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+
+import os
+import subprocess
+
+input_dir = "data/input"
+output_dir = "data/image-seq"
+
+for filename in os.listdir(input_dir):
+    if filename.endswith(".mp4"):
+        name = os.path.splitext(filename)[0]
+        output_subdir = os.path.join(output_dir, name)
+
+        if os.path.exists(output_subdir):
+            print(name, 'has been skipped as frames already exist!')
+            continue
+
+        os.makedirs(output_subdir)
+
+        input_path = os.path.join(input_dir, filename)
+        output_path = os.path.join(output_subdir, "output_%04d.png")
+
+        cmd = f"ffmpeg -i {input_path} -r 0.25 {output_path}"
+        subprocess.run(cmd, shell=True)
