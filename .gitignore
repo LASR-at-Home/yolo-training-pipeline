@@ -2,6 +2,7 @@
 *.pth
 *.pt
 *.tar.gz
+*.mp4
 
 wandb
 runs
