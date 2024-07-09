@@ -7,5 +7,8 @@ if "KCL" in os.environ and os.environ["KCL"] == "1":
     # saturate RTX A5000 GPU
     kwargs["batch"] = 128
 
-model = YOLO("yolov8n-seg.pt")
-results = model.train(data="data/dataset.yaml", epochs=150, imgsz=640, **kwargs)
+kwargs["batch"] = 7
+model = YOLO("yolov8x-seg.pt")
+results = model.train(
+    data="data/dataset.yaml", epochs=150, imgsz=640, save_period=1, **kwargs
+)
